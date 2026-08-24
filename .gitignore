@@ -1,0 +1,7 @@
+# 运行时 SQLite 数据库文件与 WAL 日志
+*.db
+*.db-wal
+*.db-shm
+
+# 编译产物
+/pileup

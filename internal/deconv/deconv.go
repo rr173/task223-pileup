@@ -21,6 +21,31 @@ type Result struct {
 	Iterations int              // 实际迭代次数
 }
 
+// KeepSeparated removes weaker detections that violate the minimum physical
+// separation. The input is copied and sorted so callers can safely pass the
+// matching-pursuit output or an independently ordered candidate list.
+func KeepSeparated(pulses []RecoveredPulse, minSeparation int) []RecoveredPulse {
+	if len(pulses) == 0 {
+		return nil
+	}
+	if minSeparation < 1 {
+		minSeparation = 1
+	}
+	ordered := append([]RecoveredPulse(nil), pulses...)
+	sortPulses(ordered)
+	out := make([]RecoveredPulse, 0, len(ordered))
+	for _, pulse := range ordered {
+		if len(out) == 0 || pulse.Position-out[len(out)-1].Position >= minSeparation {
+			out = append(out, pulse)
+			continue
+		}
+		if pulse.Amplitude > out[len(out)-1].Amplitude {
+			out[len(out)-1] = pulse
+		}
+	}
+	return out
+}
+
 // Deconvolver 受约束匹配追踪解卷积器。
 type Deconvolver struct {
 	MaxIterations int     // 最大迭代次数

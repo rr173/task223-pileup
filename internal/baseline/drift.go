@@ -29,6 +29,13 @@ func (d *DriftDetector) Classify(level float64, w DriftWindow) bool {
 	return false
 }
 
+// ClassifyWithSlope combines a window-local offset check with the run-level
+// slope budget. A slowly accumulating drift can stay within the local limit
+// while still making the run unsuitable for recovery.
+func (d *DriftDetector) ClassifyWithSlope(level float64, w DriftWindow, slope float64) bool {
+	return d.Classify(level, w) || d.SlopeExceeded(slope)
+}
+
 // SlopeExceeded 判定整体漂移斜率是否超阈值。
 func (d *DriftDetector) SlopeExceeded(slope float64) bool {
 	return math.Abs(slope) > d.MaxSlope

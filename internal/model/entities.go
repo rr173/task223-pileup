@@ -46,16 +46,16 @@ const (
 
 // Run 是一次辐射采集运行：承载探测器工况（采样率/死区时间）与波形窗口接收。
 type Run struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Description   string    `json:"description"`
-	DetectorType  string    `json:"detector_type"`   // 探测器类型（NaI/HPGe/塑料闪烁体）
-	SampleRateHz  float64   `json:"sample_rate_hz"`  // 采样率（Hz）
-	DeadTimeNs    int64     `json:"dead_time_ns"`    // 死区时间（纳秒）
-	Status        string    `json:"status"`
-	Fingerprint   string    `json:"fingerprint"`     // 幂等指纹：名称+工况哈希
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description"`
+	DetectorType string    `json:"detector_type"`  // 探测器类型（NaI/HPGe/塑料闪烁体）
+	SampleRateHz float64   `json:"sample_rate_hz"` // 采样率（Hz）
+	DeadTimeNs   int64     `json:"dead_time_ns"`   // 死区时间（纳秒）
+	Status       string    `json:"status"`
+	Fingerprint  string    `json:"fingerprint"` // 幂等指纹：名称+工况哈希
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // WaveformWindow 是一段探测器波形窗口：携带波形抽样、触发序号与时间窗。
@@ -70,7 +70,7 @@ type WaveformWindow struct {
 	PeakAmplitude float64   `json:"peak_amplitude"` // 峰值幅度（归一化 0~1）
 	Saturated     bool      `json:"saturated"`      // 是否饱和
 	Status        string    `json:"status"`
-	Fingerprint   string    `json:"fingerprint"`    // 幂等指纹：运行+触发序号哈希
+	Fingerprint   string    `json:"fingerprint"` // 幂等指纹：运行+触发序号哈希
 	CreatedAt     time.Time `json:"created_at"`
 }
 
@@ -101,54 +101,54 @@ type DeadZone struct {
 
 // BaselineRecord 记录一次运行的基线估计结果。
 type BaselineRecord struct {
-	ID           string    `json:"id"`
-	RunID        string    `json:"run_id"`
-	Level        float64   `json:"level"`         // 基线水平（归一化）
-	DriftSlope   float64   `json:"drift_slope"`   // 漂移斜率（每窗口）
-	NoiseFloor   float64   `json:"noise_floor"`   // 噪声底（均方根）
-	WindowCount  int       `json:"window_count"`  // 参与估计的窗口数
-	Locked       bool      `json:"locked"`        // 是否已锁定（锁定后不再更新）
-	CreatedAt    time.Time `json:"created_at"`
+	ID          string    `json:"id"`
+	RunID       string    `json:"run_id"`
+	Level       float64   `json:"level"`        // 基线水平（归一化）
+	DriftSlope  float64   `json:"drift_slope"`  // 漂移斜率（每窗口）
+	NoiseFloor  float64   `json:"noise_floor"`  // 噪声底（均方根）
+	WindowCount int       `json:"window_count"` // 参与估计的窗口数
+	Locked      bool      `json:"locked"`       // 是否已锁定（锁定后不再更新）
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // ReferencePulse 是锁定的参考脉冲形状：作为解卷积的匹配核。
 type ReferencePulse struct {
-	ID            string    `json:"id"`
-	RunID         string    `json:"run_id"`
-	Amplitude     float64   `json:"amplitude"`      // 归一化幅度（1.0）
-	WidthNs       int64     `json:"width_ns"`       // 半高宽（纳秒）
-	Shape         string    `json:"shape"`          // 归一化脉冲形状抽样（JSON 数组）
-	SourceWindow  string    `json:"source_window"`  // 来源窗口 ID
-	LockedAt      time.Time `json:"locked_at"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID           string    `json:"id"`
+	RunID        string    `json:"run_id"`
+	Amplitude    float64   `json:"amplitude"`     // 归一化幅度（1.0）
+	WidthNs      int64     `json:"width_ns"`      // 半高宽（纳秒）
+	Shape        string    `json:"shape"`         // 归一化脉冲形状抽样（JSON 数组）
+	SourceWindow string    `json:"source_window"` // 来源窗口 ID
+	LockedAt     time.Time `json:"locked_at"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // CountSnapshot 是发布的计数快照：冻结计数与真实计数率的不可变快照。
 type CountSnapshot struct {
-	ID                      string     `json:"id"`
-	RunID                   string     `json:"run_id"`
-	Version                 int        `json:"version"`
-	Status                  string     `json:"status"`
-	TotalCounts             int        `json:"total_counts"`              // 总计数（含恢复）
-	RecoveredCounts         int        `json:"recovered_counts"`          // 解卷积恢复的堆积计数
-	UnresolvedCounts        int        `json:"unresolved_counts"`         // 不可分离计数
-	ObservedCountRate       float64    `json:"observed_count_rate"`       // 观测计数率（counts/s）
-	TrueCountRate           float64    `json:"true_count_rate"`           // 真实计数率（死区校正）
-	EffectiveObservationNs  int64      `json:"effective_observation_ns"`  // 有效观察时间
-	DeadTimeFraction        float64    `json:"dead_time_fraction"`        // 死区占比（0~1）
-	UnrecoverableZones      int        `json:"unrecoverable_zones"`       // 不可恢复区数
-	PulsesJSON              string     `json:"pulses_json"`               // 脉冲快照（JSON）
-	Summary                 string     `json:"summary"`
-	CreatedAt               time.Time  `json:"created_at"`
-	PublishedAt             *time.Time `json:"published_at"`
+	ID                     string     `json:"id"`
+	RunID                  string     `json:"run_id"`
+	Version                int        `json:"version"`
+	Status                 string     `json:"status"`
+	TotalCounts            int        `json:"total_counts"`             // 总计数（含恢复）
+	RecoveredCounts        int        `json:"recovered_counts"`         // 解卷积恢复的堆积计数
+	UnresolvedCounts       int        `json:"unresolved_counts"`        // 不可分离计数
+	ObservedCountRate      float64    `json:"observed_count_rate"`      // 观测计数率（counts/s）
+	TrueCountRate          float64    `json:"true_count_rate"`          // 真实计数率（死区校正）
+	EffectiveObservationNs int64      `json:"effective_observation_ns"` // 有效观察时间
+	DeadTimeFraction       float64    `json:"dead_time_fraction"`       // 死区占比（0~1）
+	UnrecoverableZones     int        `json:"unrecoverable_zones"`      // 不可恢复区数
+	PulsesJSON             string     `json:"pulses_json"`              // 脉冲快照（JSON）
+	Summary                string     `json:"summary"`
+	CreatedAt              time.Time  `json:"created_at"`
+	PublishedAt            *time.Time `json:"published_at"`
 }
 
 // StatSummary 是自检/统计接口返回的全局快照。
 type StatSummary struct {
-	Runs       int `json:"runs"`
-	Windows    int `json:"windows"`
-	Pulses     int `json:"pulses"`
-	Snapshots  int `json:"snapshots"`
-	DeadZones  int `json:"dead_zones"`
-	OpenRuns   int `json:"open_runs"`
+	Runs      int `json:"runs"`
+	Windows   int `json:"windows"`
+	Pulses    int `json:"pulses"`
+	Snapshots int `json:"snapshots"`
+	DeadZones int `json:"dead_zones"`
+	OpenRuns  int `json:"open_runs"`
 }

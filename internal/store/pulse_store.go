@@ -108,6 +108,43 @@ func (s *PulseStore) UpdateStatus(id, next string) error {
 	return nil
 }
 
+// UpdateStatusIfRunMutable changes a pulse only while its owning run is
+// mutable. The run-state predicate belongs in the storage update so a caller
+// cannot pass a stale in-memory run check between read and write.
+func (s *PulseStore) UpdateStatusIfRunMutable(id, runID, next string) error {
+	res, err := s.db.SQL().Exec(
+		`UPDATE pulses SET status = ?, updated_at = ?
+		 WHERE id = ? AND run_id = ? AND EXISTS (SELECT 1 FROM runs WHERE id = ? AND status != ?)`,
+		next, ts(nowUTC()), id, runID, runID, model.RunSealed,
+	)
+	if err != nil {
+		return fmt.Errorf("update mutable pulse status: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		sealed, checkErr := s.isRunSealed(runID)
+		if checkErr != nil {
+			return checkErr
+		}
+		if sealed {
+			return model.ErrSealed
+		}
+		return model.ErrNotFound
+	}
+	return nil
+}
+
+func (s *PulseStore) isRunSealed(runID string) (bool, error) {
+	var status string
+	if err := s.db.SQL().QueryRow(`SELECT status FROM runs WHERE id = ?`, runID).Scan(&status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, model.ErrNotFound
+		}
+		return false, err
+	}
+	return status == model.RunSealed, nil
+}
+
 // DeleteByRun 删除某运行的全部脉冲（解卷积重跑前清理旧结果）。
 func (s *PulseStore) DeleteByRun(runID string) error {
 	_, err := s.db.SQL().Exec(`DELETE FROM pulses WHERE run_id = ?`, runID)
@@ -141,5 +178,16 @@ func (s *PulseStore) CountInseparable(runID string) (int, error) {
 	err := s.db.SQL().QueryRow(
 		`SELECT COUNT(*) FROM pulses WHERE run_id = ? AND status = ?`,
 		runID, model.PulseInseparable).Scan(&n)
+	return n, err
+}
+
+// CountReviewPending counts pulses that still require an explicit experimenter
+// decision before the run can be completed.
+func (s *PulseStore) CountReviewPending(runID string) (int, error) {
+	var n int
+	err := s.db.SQL().QueryRow(
+		`SELECT COUNT(*) FROM pulses WHERE run_id = ? AND status IN (?, ?)`,
+		runID, model.PulseCandidate, model.PulseSeparated,
+	).Scan(&n)
 	return n, err
 }

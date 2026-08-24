@@ -17,11 +17,21 @@ type Zone struct {
 	StartSample int    // 起始样本
 	EndSample   int    // 结束样本（含）
 	Reason      string // 原因
+	OriginNs    int64  // 所属波形窗口的绝对起点，避免跨窗口坐标合并
+}
+
+// SaturatedZone returns the precise saturated interval in a waveform.
+func SaturatedZone(wave []float64, baseline, fullScale, flatRatio float64) (Zone, bool) {
+	start, end, ok := SaturatedRangeAboveBaseline(wave, baseline, fullScale, flatRatio)
+	if !ok {
+		return Zone{}, false
+	}
+	return Zone{StartSample: start, EndSample: end, Reason: ReasonSaturated}, true
 }
 
 // Merger 死区标记与合并器。
 type Merger struct {
-	MergeGap int    // 相邻死区间隔小于此样本数则合并
+	MergeGap int // 相邻死区间隔小于此样本数则合并
 	zones    []Zone
 }
 
@@ -48,7 +58,7 @@ func (m *Merger) Zones() []Zone {
 	var merged []Zone
 	cur := sorted[0]
 	for _, z := range sorted[1:] {
-		if z.StartSample-cur.EndSample <= m.MergeGap {
+		if z.OriginNs == cur.OriginNs && z.StartSample-cur.EndSample <= m.MergeGap {
 			if z.EndSample > cur.EndSample {
 				cur.EndSample = z.EndSample
 			}

@@ -36,10 +36,10 @@ func New(db *store.DB) (*App, error) {
 		db:    db,
 		stats: stats,
 	}
-	app.Runs = NewRunService(runStore)
+	app.Runs = NewRunService(runStore, pulseStore)
 	app.Windows = NewWindowService(windowStore, runStore)
 	app.Deconv = NewDeconvService(runStore, windowStore, pulseStore, deadZoneStore, baselineStore)
-	app.Snapshots = NewSnapshotService(snapshotStore, pulseStore, deadZoneStore, runStore, windowStore)
+	app.Snapshots = NewSnapshotService(snapshotStore, pulseStore, deadZoneStore, runStore, windowStore, &app.mu)
 	return app, nil
 }
 

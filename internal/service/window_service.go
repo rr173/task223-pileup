@@ -60,7 +60,7 @@ func (s *WindowService) Ingest(run *model.Run, triggerIndex, startTimeNs, durati
 	baselineLevel := medianOf(samples)
 	peak := maxOf(samples)
 
-	saturated := deadzone.DetectSaturation(samples, 1.0, 0.98, 4)
+	saturated := deadzone.DetectSaturationAboveBaseline(samples, baselineLevel, 1.0, 0.98, 4)
 	status := model.WindowRaw
 	if saturated {
 		status = model.WindowSaturated

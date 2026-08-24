@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"task223-pileup/internal/counting"
@@ -19,10 +20,11 @@ type SnapshotService struct {
 	runStore      *store.RunStore
 	windowStore   *store.WindowStore
 	builder       *snapshot.Builder
+	mu            *sync.Mutex
 }
 
 // NewSnapshotService 构造快照服务。
-func NewSnapshotService(s *store.SnapshotStore, p *store.PulseStore, d *store.DeadZoneStore, r *store.RunStore, w *store.WindowStore) *SnapshotService {
+func NewSnapshotService(s *store.SnapshotStore, p *store.PulseStore, d *store.DeadZoneStore, r *store.RunStore, w *store.WindowStore, mu *sync.Mutex) *SnapshotService {
 	return &SnapshotService{
 		store:         s,
 		pulseStore:    p,
@@ -30,18 +32,28 @@ func NewSnapshotService(s *store.SnapshotStore, p *store.PulseStore, d *store.De
 		runStore:      r,
 		windowStore:   w,
 		builder:       snapshot.NewBuilder(),
+		mu:            mu,
 	}
 }
 
 // Publish 发布一次计数快照：汇总计数、构建不可变快照、封存运行、
 // 并把旧快照标记为替代版本。
 func (s *SnapshotService) Publish(runID string) (*model.CountSnapshot, error) {
+	if s.mu != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+	}
 	run, err := s.runStore.Get(runID)
 	if err != nil {
 		return nil, err
 	}
 	if run.Status != model.RunCompleted {
 		return nil, fmt.Errorf("%w: run is %s, not completed", model.ErrInvalidState, run.Status)
+	}
+	if pending, err := s.pulseStore.CountReviewPending(runID); err != nil {
+		return nil, err
+	} else if pending > 0 {
+		return nil, fmt.Errorf("%w: %d pulses still need review", model.ErrConflict, pending)
 	}
 
 	// 计数汇总。

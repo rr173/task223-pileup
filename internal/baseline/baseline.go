@@ -10,10 +10,16 @@ import (
 
 // Result 是一次基线估计的输出。
 type Result struct {
-	Level      float64 // 基线水平（归一化）
-	DriftSlope float64 // 漂移斜率（每窗口相对变化）
-	NoiseFloor float64 // 噪声底（残差均方根）
-	WindowCount int    // 参与估计的窗口数
+	Level       float64 // 基线水平（归一化）
+	DriftSlope  float64 // 漂移斜率（每窗口相对变化）
+	NoiseFloor  float64 // 噪声底（残差均方根）
+	WindowCount int     // 参与估计的窗口数
+}
+
+// DriftExceeded reports whether the fitted run-level drift violates the
+// detector's slope budget.
+func (r Result) DriftExceeded(d *DriftDetector) bool {
+	return d != nil && d.SlopeExceeded(r.DriftSlope)
 }
 
 // Estimator 从多个波形窗口估计基线参数。

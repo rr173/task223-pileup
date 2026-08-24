@@ -80,7 +80,7 @@ func (s *DeadZoneStore) CountByRun(runID string) (int, error) {
 func (s *DeadZoneStore) TotalDuration(runID string) (int64, error) {
 	var n int64
 	err := s.db.SQL().QueryRow(
-		`SELECT COALESCE(SUM(end_time_ns - start_time_ns), 0) FROM dead_zones WHERE run_id = ?`, runID).Scan(&n)
+		`SELECT COALESCE(SUM(CASE WHEN end_time_ns > start_time_ns THEN end_time_ns - start_time_ns ELSE 0 END), 0) FROM dead_zones WHERE run_id = ?`, runID).Scan(&n)
 	if err != nil {
 		return 0, err
 	}

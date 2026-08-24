@@ -40,6 +40,12 @@ func ExtractReference(wave []float64, peakPos, radius int) []float64 {
 	return shape
 }
 
+// ExtractReferenceForPeak is the explicit reference-extraction entry point
+// used after the caller has verified that the peak is isolated.
+func ExtractReferenceForPeak(wave []float64, peakPos, radius int) []float64 {
+	return ExtractReference(wave, peakPos, radius)
+}
+
 // Normalize 把任意形状按峰值归一化到 1.0。
 func Normalize(shape []float64) []float64 {
 	if len(shape) == 0 {

@@ -200,10 +200,15 @@ func (s *DeconvService) Deconvolve(runID string) (*DeconvResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		switch w.Status {
-		case model.WindowSaturated:
+		isSaturated := w.Saturated || deadzone.DetectSaturationAboveBaseline(samples, w.BaselineLevel, 1.0, 0.98, 4)
+		switch {
+		case isSaturated || w.Status == model.WindowSaturated:
 			res.SaturatedWindowCount++
-			s.addZone(merger, run, w, 0, len(samples), deadzone.ReasonSaturated)
+			zone, ok := deadzone.SaturatedZone(samples, w.BaselineLevel, 1.0, 0.98)
+			if !ok {
+				zone = deadzone.Zone{StartSample: 0, EndSample: len(samples) - 1, Reason: deadzone.ReasonSaturated}
+			}
+			s.addZone(merger, run, w, zone.StartSample, zone.EndSample, zone.Reason)
 			continue
 		}
 
@@ -211,7 +216,7 @@ func (s *DeconvService) Deconvolve(runID string) (*DeconvResult, error) {
 		wave := subtractBaseline(samples, w.BaselineLevel)
 
 		// 基线漂移判定：窗口基线相对全局基线偏离过大则整窗标记死区。
-		if s.driftDetector.Classify(bl.Level, baseline.DriftWindow{WindowBase: w.BaselineLevel}) {
+		if s.driftDetector.ClassifyWithSlope(bl.Level, baseline.DriftWindow{WindowBase: w.BaselineLevel}, bl.DriftSlope) || s.driftDetector.SlopeExceeded(bl.DriftSlope) {
 			s.addZone(merger, run, w, 0, len(samples), deadzone.ReasonBaselineDrift)
 			continue
 		}
@@ -230,6 +235,7 @@ func (s *DeconvService) Deconvolve(runID string) (*DeconvResult, error) {
 			// 而非死区时间本身——堆积脉冲间距小于死区但大于可分辨宽度。
 			res.PiledWindowCount++
 			minSep := maxInt(2, dtSamples/4)
+			s.constraints.MinSeparation = minSep
 			result := s.deconvolver.Deconvolve(wave, refShape, minSep, bl.NoiseFloor)
 			filtered := s.constraints.Filter(result.Pulses)
 			if !s.constraints.Separable(result) || !deconv.NonNegative(filtered) {
@@ -251,10 +257,10 @@ func (s *DeconvService) Deconvolve(runID string) (*DeconvResult, error) {
 	// 写死区。
 	for _, z := range merger.Zones() {
 		dz := &model.DeadZone{
-			ID:          "dz-" + shortHash(fmt.Sprintf("%s-%d-%d", runID, z.StartSample, z.EndSample)),
+			ID:          fmt.Sprintf("dz-%s-%d-%d-%d", runID, z.OriginNs, z.StartSample, z.EndSample),
 			RunID:       runID,
-			StartTimeNs: s.sampleToNs(run, z.StartSample),
-			EndTimeNs:   s.sampleToNs(run, z.EndSample),
+			StartTimeNs: z.OriginNs + s.sampleToNs(run, z.StartSample),
+			EndTimeNs:   z.OriginNs + s.sampleToNs(run, z.EndSample),
 			Reason:      z.Reason,
 			CreatedAt:   time.Now().UTC(),
 		}
@@ -292,7 +298,14 @@ func (s *DeconvService) ConfirmPulse(id string) (*model.PulseEvent, error) {
 	if p.Status != model.PulseSeparated {
 		return nil, fmt.Errorf("%w: pulse is %s, not separated", model.ErrInvalidState, p.Status)
 	}
-	if err := s.pulseStore.UpdateStatus(id, model.PulseConfirmed); err != nil {
+	sealed, err := s.runStore.IsSealed(p.RunID)
+	if err != nil {
+		return nil, err
+	}
+	if sealed {
+		return nil, model.ErrSealed
+	}
+	if err := s.pulseStore.UpdateStatusIfRunMutable(id, p.RunID, model.PulseConfirmed); err != nil {
 		return nil, err
 	}
 	return s.pulseStore.Get(id)
@@ -307,7 +320,14 @@ func (s *DeconvService) RejectPulse(id string) (*model.PulseEvent, error) {
 	if p.Status == model.PulseConfirmed {
 		return nil, fmt.Errorf("%w: confirmed pulse cannot be rejected", model.ErrInvalidState)
 	}
-	if err := s.pulseStore.UpdateStatus(id, model.PulseInseparable); err != nil {
+	sealed, err := s.runStore.IsSealed(p.RunID)
+	if err != nil {
+		return nil, err
+	}
+	if sealed {
+		return nil, model.ErrSealed
+	}
+	if err := s.pulseStore.UpdateStatusIfRunMutable(id, p.RunID, model.PulseInseparable); err != nil {
 		return nil, err
 	}
 	return s.pulseStore.Get(id)
@@ -353,7 +373,7 @@ func (s *DeconvService) extractShape(samples []float64, base float64, radius int
 	if radius < 2 {
 		radius = 8
 	}
-	return deconv.ExtractReference(wave, pos, radius), pos
+	return deconv.ExtractReferenceForPeak(wave, pos, radius), pos
 }
 
 // lockOrExtractReference 返回参考脉冲：优先已锁定，否则从孤立脉冲自动提取。
@@ -375,7 +395,22 @@ func (s *DeconvService) lockOrExtractReference(run *model.Run) (*model.Reference
 		if err != nil {
 			continue
 		}
-		shape, _ := s.extractShape(samples, w.BaselineLevel, dtSamples)
+		wave := subtractBaseline(samples, w.BaselineLevel)
+		peaks := detector.NewPeakDetector(0.05, maxInt(2, dtSamples/2)).Detect(wave)
+		groups := detector.NewPileUpDetector(dtSamples).Group(peaks)
+		var isolated detector.Peak
+		found := false
+		for _, group := range groups {
+			if peak, ok := group.IsolatedPeak(); ok {
+				isolated = peak
+				found = true
+				break
+			}
+		}
+		if !found {
+			continue
+		}
+		shape := deconv.ExtractReferenceForPeak(wave, isolated.Position, dtSamples)
 		if shape == nil {
 			continue
 		}
@@ -420,7 +455,7 @@ func (s *DeconvService) addPulse(run *model.Run, w model.WaveformWindow, pos int
 
 // addZone 把一个死区（样本坐标）加入合并器。
 func (s *DeconvService) addZone(m *deadzone.Merger, run *model.Run, w model.WaveformWindow, start, end int, reason string) {
-	m.Add(deadzone.Zone{StartSample: start, EndSample: end, Reason: reason})
+	m.Add(deadzone.Zone{StartSample: start, EndSample: end, Reason: reason, OriginNs: w.StartTimeNs})
 }
 
 // groupSpan 返回堆积组覆盖的样本区间。

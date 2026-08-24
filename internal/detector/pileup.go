@@ -40,3 +40,12 @@ func (p *PileUpDetector) Group(peaks []Peak) []PileUp {
 
 // IsPiled 判断一个堆积组是否为真实堆积（含多于一个峰）。
 func (g PileUp) IsPiled() bool { return len(g.Peaks) > 1 }
+
+// IsolatedPeak returns the sole peak when this group is safe to use as a
+// reference pulse source.
+func (g PileUp) IsolatedPeak() (Peak, bool) {
+	if g.IsPiled() || len(g.Peaks) == 0 {
+		return Peak{}, false
+	}
+	return g.Peaks[0], true
+}

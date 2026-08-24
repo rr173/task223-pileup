@@ -60,6 +60,9 @@ func (s *SnapshotStore) Create(sn *model.CountSnapshot) error {
 		sn.UnrecoverableZones, sn.PulsesJSON, sn.Summary, ts(sn.CreatedAt), published,
 	)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return model.ErrDuplicate
+		}
 		return fmt.Errorf("insert snapshot: %w", err)
 	}
 	return nil

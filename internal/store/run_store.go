@@ -100,3 +100,15 @@ func (s *RunStore) CountOpenRuns() (int, error) {
 	err := s.db.SQL().QueryRow(`SELECT COUNT(*) FROM runs WHERE status != ?`, model.RunSealed).Scan(&n)
 	return n, err
 }
+
+// IsSealed reports whether a run is in its immutable terminal state.
+func (s *RunStore) IsSealed(id string) (bool, error) {
+	var status string
+	if err := s.db.SQL().QueryRow(`SELECT status FROM runs WHERE id = ?`, id).Scan(&status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, model.ErrNotFound
+		}
+		return false, err
+	}
+	return status == model.RunSealed, nil
+}

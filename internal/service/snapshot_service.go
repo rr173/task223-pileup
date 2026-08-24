@@ -45,7 +45,11 @@ func (s *SnapshotService) Publish(runID string) (*model.CountSnapshot, error) {
 	}
 
 	// 计数汇总。
-	recovered, err := s.pulseStore.CountSeparated(runID)
+	separated, err := s.pulseStore.CountSeparated(runID)
+	if err != nil {
+		return nil, err
+	}
+	recovered, err := s.pulseStore.CountRecovered(runID)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +72,7 @@ func (s *SnapshotService) Publish(runID string) (*model.CountSnapshot, error) {
 		return nil, err
 	}
 
-	sum := counting.Aggregate(recovered, unresolved, recovered, float64(run.DeadTimeNs)/1e9, totalObsNs, deadZoneNs, zones)
+	sum := counting.Aggregate(separated, unresolved, recovered, float64(run.DeadTimeNs)/1e9, totalObsNs, deadZoneNs, zones)
 
 	// 脉冲证据快照。
 	pulses, err := s.pulseStore.ListByRun(runID)

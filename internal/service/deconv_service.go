@@ -45,12 +45,12 @@ func NewDeconvService(runStore *store.RunStore, windowStore *store.WindowStore,
 
 // DeconvResult 是一次解卷积处理的结果摘要。
 type DeconvResult struct {
-	WindowCount         int // 处理窗口数
-	PiledWindowCount    int // 堆积窗口数
+	WindowCount          int // 处理窗口数
+	PiledWindowCount     int // 堆积窗口数
 	SaturatedWindowCount int // 饱和窗口数
-	RecoveredPulses     int // 恢复脉冲数
-	InseparablePulses   int // 不可分离脉冲数
-	DeadZones           int // 死区数
+	RecoveredPulses      int // 恢复脉冲数
+	InseparablePulses    int // 不可分离脉冲数
+	DeadZones            int // 死区数
 }
 
 // EstimateBaseline 估计运行基线并落库。
@@ -223,7 +223,7 @@ func (s *DeconvService) Deconvolve(runID string) (*DeconvResult, error) {
 			if !g.IsPiled() {
 				// 孤立脉冲：直接确认。
 				pk := g.Peaks[0]
-				s.addPulse(run, w, pk.Position, pk.Amplitude, groupIdx, model.PulseSeparated, 0, 0.99)
+				s.addPulse(run, w, pk.Position, pk.Amplitude, 0, model.PulseSeparated, 0, 0.99)
 				continue
 			}
 			// 堆积：解卷积。最小间隔取脉冲可分辨宽度（死区时间的 1/4），

@@ -126,6 +126,15 @@ func (s *PulseStore) CountSeparated(runID string) (int, error) {
 	return n, err
 }
 
+// CountRecovered 统计由堆积解卷积恢复的脉冲（group_index > 0）。
+func (s *PulseStore) CountRecovered(runID string) (int, error) {
+	var n int
+	err := s.db.SQL().QueryRow(
+		`SELECT COUNT(*) FROM pulses WHERE run_id = ? AND group_index > 0 AND status IN (?, ?)`,
+		runID, model.PulseSeparated, model.PulseConfirmed).Scan(&n)
+	return n, err
+}
+
 // CountInseparable 统计某运行不可分离的脉冲数。
 func (s *PulseStore) CountInseparable(runID string) (int, error) {
 	var n int

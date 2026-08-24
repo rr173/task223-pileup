@@ -42,6 +42,12 @@ func DetectSaturationAboveBaseline(wave []float64, baseline, fullScale, flatRati
 			corrected[i] = 0
 		}
 	}
+	// A low-baseline waveform may be physically clipped at the ADC full-scale
+	// value; retain that clipping signal while avoiding the same raw-level
+	// decision for high-DC-baseline windows.
+	if baseline < fullScale*0.5 && DetectSaturation(wave, fullScale, flatRatio, flatRun) {
+		return true
+	}
 	return DetectSaturation(corrected, fullScale, flatRatio, flatRun)
 }
 

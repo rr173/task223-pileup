@@ -56,12 +56,12 @@ func main() {
 
 // 冒烟测试的波形参数。
 const (
-	smokeSampleRate = 5e8  // 500 MHz 采样率（每 2ns 一个样本）
-	smokeWindowNs   = 400  // 每窗口时长（纳秒）
-	smokeDeadTimeNs = 40   // 死区时间（纳秒）→ 20 样本
-	smokeSamples    = 200  // 每窗口样本数（400ns / 2ns）
-	smokeWindows    = 12   // 总窗口数
-	smokePulseSigma = 4.0  // 高斯脉冲宽度（样本），半高宽约 9.4 样本
+	smokeSampleRate = 5e8 // 500 MHz 采样率（每 2ns 一个样本）
+	smokeWindowNs   = 400 // 每窗口时长（纳秒）
+	smokeDeadTimeNs = 40  // 死区时间（纳秒）→ 20 样本
+	smokeSamples    = 200 // 每窗口样本数（400ns / 2ns）
+	smokeWindows    = 12  // 总窗口数
+	smokePulseSigma = 4.0 // 高斯脉冲宽度（样本），半高宽约 9.4 样本
 )
 
 // addPulse 把一个高斯脉冲叠加到波形上（幅度 amp、中心 center、宽度 sigma）。
@@ -228,6 +228,15 @@ func runSmokeTest(dbPath string) error {
 	}
 
 	// --- 步骤 6：确认运行 ---
+	for _, p := range pulses {
+		if p.Status != model.PulseSeparated {
+			continue
+		}
+		if _, err := app.Deconv.ConfirmPulse(p.ID); err != nil {
+			db.Close()
+			return fmt.Errorf("confirm pulse %s: %w", p.ID, err)
+		}
+	}
 	run, err = app.Runs.Confirm(run.ID)
 	if err != nil {
 		db.Close()

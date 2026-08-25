@@ -172,3 +172,12 @@ func sortPulses(p []RecoveredPulse) {
 		}
 	}
 }
+
+// sortPulsesByAmpDesc 按幅度降序原地排序（幅度相同者保持稳定相对顺序）。
+func sortPulsesByAmpDesc(p []RecoveredPulse) {
+	for i := 1; i < len(p); i++ {
+		for j := i; j > 0 && p[j].Amplitude > p[j-1].Amplitude; j-- {
+			p[j], p[j-1] = p[j-1], p[j]
+		}
+	}
+}

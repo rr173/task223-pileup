@@ -60,7 +60,12 @@ func (s *WindowService) Ingest(run *model.Run, triggerIndex, startTimeNs, durati
 	baselineLevel := medianOf(samples)
 	peak := maxOf(samples)
 
-	saturated := deadzone.DetectSaturation(samples, 1.0, 0.98, 4)
+	// 饱和检测在扣除窗口直流基线后的幅度上判断，避免基线整体偏高时把
+	// 本可恢复的脉冲误判为饱和。直流基线取窗口噪声底（最小样本）——它是
+	// 静默电平的稳健下界，真正打满量程的平顶信号去基线后仍接近满量程，
+	// 而只是被基线抬高的脉冲去基线后远低于量程。
+	dcBaseline := minOf(samples)
+	saturated := deadzone.DetectSaturationAboveBaseline(samples, dcBaseline, 1.0, 0.98, 4)
 	status := model.WindowRaw
 	if saturated {
 		status = model.WindowSaturated
@@ -166,6 +171,19 @@ func maxOf(v []float64) float64 {
 	m := v[0]
 	for _, x := range v[1:] {
 		if x > m {
+			m = x
+		}
+	}
+	return m
+}
+
+func minOf(v []float64) float64 {
+	if len(v) == 0 {
+		return 0
+	}
+	m := v[0]
+	for _, x := range v[1:] {
+		if x < m {
 			m = x
 		}
 	}

@@ -203,7 +203,10 @@ func (s *DeconvService) Deconvolve(runID string) (*DeconvResult, error) {
 		switch w.Status {
 		case model.WindowSaturated:
 			res.SaturatedWindowCount++
-			zone, ok := deadzone.SaturatedZone(samples, w.BaselineLevel, 1.0, 0.98)
+			// 死区范围同样在扣除窗口直流基线后定位，与接收端分类口径一致：
+			// 真正打满量程的平顶段去基线后仍接近满量程，定位到该段；若窗口
+			// 整体已被标记饱和但去基线后未达阈值（极端裁剪），则整窗计为死区。
+			zone, ok := deadzone.SaturatedZone(samples, dcBaselineOf(samples), 1.0, 0.98)
 			if !ok {
 				zone = deadzone.Zone{StartSample: 0, EndSample: len(samples) - 1, Reason: deadzone.ReasonSaturated}
 			}
@@ -485,6 +488,21 @@ func subtractBaseline(samples []float64, base float64) []float64 {
 		}
 	}
 	return out
+}
+
+// dcBaselineOf 返回窗口直流基线（噪声底，取最小样本），用于饱和判据中
+// 扣除窗口直流偏置，与接收端分类保持同口径。
+func dcBaselineOf(samples []float64) float64 {
+	if len(samples) == 0 {
+		return 0
+	}
+	m := samples[0]
+	for _, x := range samples[1:] {
+		if x < m {
+			m = x
+		}
+	}
+	return m
 }
 
 func maxInt(a, b int) int {

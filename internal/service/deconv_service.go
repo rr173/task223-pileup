@@ -1,6 +1,8 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -255,12 +257,17 @@ func (s *DeconvService) Deconvolve(runID string) (*DeconvResult, error) {
 	}
 
 	// 写死区。
+	// 死区在本地样本坐标中已按窗口分组合并；这里把每条死区的本地样本偏移
+	// 叠加到其所属窗口的绝对起点上，还原运行时间轴上的绝对区间，避免不同
+	// 窗口的死区被压成同一坐标系内的单一区间而丢失绝对时间来源。
 	for _, z := range merger.Zones() {
+		startNs := z.WindowStartNs + s.sampleToNs(run, z.StartSample)
+		endNs := z.WindowStartNs + s.sampleToNs(run, z.EndSample)
 		dz := &model.DeadZone{
-			ID:          "dz-" + shortHash(fmt.Sprintf("%s-%d-%d", runID, z.StartSample, z.EndSample)),
+			ID:          "dz-" + hashID(runID, z.WindowID, startNs, endNs),
 			RunID:       runID,
-			StartTimeNs: s.sampleToNs(run, z.StartSample),
-			EndTimeNs:   s.sampleToNs(run, z.EndSample),
+			StartTimeNs: startNs,
+			EndTimeNs:   endNs,
 			Reason:      z.Reason,
 			CreatedAt:   time.Now().UTC(),
 		}
@@ -453,9 +460,24 @@ func (s *DeconvService) addPulse(run *model.Run, w model.WaveformWindow, pos int
 	_ = s.pulseStore.Create(p)
 }
 
-// addZone 把一个死区（样本坐标）加入合并器。
+// addZone 把一个死区（本地样本坐标）加入合并器，并记录其所属窗口 ID 与窗口
+// 绝对起点，使合并只发生在同一窗口坐标内、保存时能还原每个窗口的绝对时间。
 func (s *DeconvService) addZone(m *deadzone.Merger, run *model.Run, w model.WaveformWindow, start, end int, reason string) {
-	m.Add(deadzone.Zone{StartSample: start, EndSample: end, Reason: reason})
+	m.Add(deadzone.Zone{
+		StartSample:   start,
+		EndSample:     end,
+		Reason:        reason,
+		WindowID:      w.ID,
+		WindowStartNs: w.StartTimeNs,
+	})
+}
+
+// hashID 由运行、窗口与死区绝对时间区间派生一个 12 字符十六进制摘要，作为
+// 死区主键后缀。不同窗口或不同绝对区间的死区必产生不同摘要，避免同一运行
+// 多条死区因前缀相同而被 shortHash 截断成相同主键。
+func hashID(runID, windowID string, startNs, endNs int64) string {
+	h := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%d|%d", runID, windowID, startNs, endNs)))
+	return hex.EncodeToString(h[:])[:12]
 }
 
 // groupSpan 返回堆积组覆盖的样本区间。

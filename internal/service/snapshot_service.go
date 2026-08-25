@@ -50,6 +50,15 @@ func (s *SnapshotService) Publish(runID string) (*model.CountSnapshot, error) {
 	if run.Status != model.RunCompleted {
 		return nil, fmt.Errorf("%w: run is %s, not completed", model.ErrInvalidState, run.Status)
 	}
+	// 边界检查：仍存在待复核脉冲时不得发布快照，
+	// 与运行确认接口保持同一条边界检查，避免发布不完整的计数快照。
+	pending, err := s.pulseStore.CountPendingReview(runID)
+	if err != nil {
+		return nil, err
+	}
+	if pending > 0 {
+		return nil, fmt.Errorf("%w: %d pulse(s) still pending review", model.ErrInvalidState, pending)
+	}
 
 	// 计数汇总。
 	separated, err := s.pulseStore.CountSeparated(runID)

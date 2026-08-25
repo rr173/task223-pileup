@@ -12,11 +12,14 @@ import (
 
 // RunService 采集运行生命周期服务。
 type RunService struct {
-	store *store.RunStore
+	store      *store.RunStore
+	pulseStore *store.PulseStore
 }
 
 // NewRunService 构造运行服务。
-func NewRunService(s *store.RunStore) *RunService { return &RunService{store: s} }
+func NewRunService(s *store.RunStore, p *store.PulseStore) *RunService {
+	return &RunService{store: s, pulseStore: p}
+}
 
 // Create 登记一次采集运行（初始状态 receiving）。
 func (s *RunService) Create(name, description, detectorType string, sampleRateHz float64, deadTimeNs int64) (*model.Run, error) {
@@ -66,7 +69,17 @@ func (s *RunService) CompleteProcessing(id string) (*model.Run, error) {
 }
 
 // Confirm 待复核 -> 已完成（复核通过）。
+//
+// 只有当所有待复核脉冲都已被实验人员确认或否决后，运行才能完成。
+// 仍存在已分离但未复核脉冲时拒绝流转，避免发布不完整的计数快照。
 func (s *RunService) Confirm(id string) (*model.Run, error) {
+	pending, err := s.pulseStore.CountPendingReview(id)
+	if err != nil {
+		return nil, err
+	}
+	if pending > 0 {
+		return nil, fmt.Errorf("%w: %d pulse(s) still pending review", model.ErrInvalidState, pending)
+	}
 	return s.transition(id, model.RunPendingReview, model.RunCompleted)
 }
 

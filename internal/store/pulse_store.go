@@ -180,3 +180,14 @@ func (s *PulseStore) CountInseparable(runID string) (int, error) {
 		runID, model.PulseInseparable).Scan(&n)
 	return n, err
 }
+
+// CountPendingReview 统计某运行仍处于待复核状态的脉冲数：
+// 即已分离但尚未被实验人员确认或否决的脉冲。
+// 存在此类脉冲时，运行不得流转为已完成，也不得发布计数快照。
+func (s *PulseStore) CountPendingReview(runID string) (int, error) {
+	var n int
+	err := s.db.SQL().QueryRow(
+		`SELECT COUNT(*) FROM pulses WHERE run_id = ? AND status = ?`,
+		runID, model.PulseSeparated).Scan(&n)
+	return n, err
+}

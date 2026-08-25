@@ -94,6 +94,57 @@ func (s *RunStore) UpdateStatus(id, expected, next string) (bool, error) {
 	return n > 0, nil
 }
 
+// SealIfCompleted 在单事务内把运行从 completed 推进到 sealed，
+// 并在成功推进后于同一事务内执行 fn（fn 负责写入封存结果，如计数快照）。
+//
+// 作为发布并发协调的唯一决策点：条件更新
+// `UPDATE runs SET status='sealed' WHERE id=? AND status='completed'`
+// 是原子的——只有成功推进状态的那一个发布者会调用 fn 并提交；
+// 其余并发请求影响 0 行（run 已被赢家先行封存），不调用 fn，返回 (false, nil)。
+// 调用方据此区分“已被另一请求封存”与“自己成功发布”。
+//
+// 事务保证封存决策与 fn 的写入要么整体提交、要么整体回滚，
+// 不会留下“run 已 sealed 但无快照”的脏状态。
+//
+// 返回值：
+//   - (true, nil)  成功封存且 fn 已提交；
+//   - (false, nil) run 已不在 completed（通常已被另一请求封存），fn 未执行；
+//   - (false, err) 事务内错误，已回滚。
+func (s *RunStore) SealIfCompleted(runID string, fn func(*sql.Tx) error) (bool, error) {
+	tx, err := s.db.SQL().Begin()
+	if err != nil {
+		return false, fmt.Errorf("begin seal tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	res, err := tx.Exec(
+		`UPDATE runs SET status = ?, updated_at = ? WHERE id = ? AND status = ?`,
+		model.RunSealed, ts(nowUTC()), runID, model.RunCompleted,
+	)
+	if err != nil {
+		return false, fmt.Errorf("seal run: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		// run 已不在 completed：被另一并发发布者先行封存。
+		return false, nil
+	}
+
+	if err := fn(tx); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit seal tx: %w", err)
+	}
+	committed = true
+	return true, nil
+}
+
 // CountOpenRuns 统计未封存的运行数。
 func (s *RunStore) CountOpenRuns() (int, error) {
 	var n int

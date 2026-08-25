@@ -1,6 +1,7 @@
 package service
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -35,12 +36,23 @@ func NewSnapshotService(s *store.SnapshotStore, p *store.PulseStore, d *store.De
 
 // Publish 发布一次计数快照：汇总计数、构建不可变快照、封存运行、
 // 并把旧快照标记为替代版本。
+//
+// 并发协调：把“运行 completed → sealed”的状态推进作为发布的唯一决策点。
+// SealIfCompleted 在单事务内用条件更新
+// `UPDATE runs SET status='sealed' WHERE id=? AND status='completed'`
+// 决定赢家——只有成功推进状态的那个请求才会进入快照写入；其余并发请求
+// 看到运行已被封存，直接返回 model.ErrSealed（运行不可再发布），
+// 不再尝试争抢版本号、也不会把 (run_id, version) 唯一约束错误暴露出去。
+// 封存决策与快照写入在同一事务内原子提交，保留单次发布的快照与封存结果。
 func (s *SnapshotService) Publish(runID string) (*model.CountSnapshot, error) {
 	run, err := s.runStore.Get(runID)
 	if err != nil {
 		return nil, err
 	}
 	if run.Status != model.RunCompleted {
+		if run.Status == model.RunSealed {
+			return nil, fmt.Errorf("%w: run is sealed, no longer publishable", model.ErrSealed)
+		}
 		return nil, fmt.Errorf("%w: run is %s, not completed", model.ErrInvalidState, run.Status)
 	}
 	if pending, err := s.pulseStore.CountReviewPending(runID); err != nil {
@@ -89,29 +101,34 @@ func (s *SnapshotService) Publish(runID string) (*model.CountSnapshot, error) {
 		return nil, err
 	}
 
-	// 版本号。
-	version, err := s.store.NextVersion(runID)
+	// 在单事务内封存运行并写入快照。版本号的读与插入紧邻执行于同一事务，
+	// 避免跨请求争抢同一版本号。只有赢家提交，输家返回 ErrSealed。
+	var sn *model.CountSnapshot
+	sealed, err := s.runStore.SealIfCompleted(runID, func(tx *sql.Tx) error {
+		version, err := s.store.NextVersionTx(tx, runID)
+		if err != nil {
+			return err
+		}
+		built := s.builder.Build(runID, version, sum, string(pulsesJSON))
+		built.Status = model.SnapshotPublished
+		now := time.Now().UTC()
+		built.PublishedAt = &now
+		// 旧已发布快照 → superseded。
+		if err := s.store.MarkSupersededTx(tx, runID); err != nil {
+			return err
+		}
+		if err := s.store.CreateTx(tx, built); err != nil {
+			return err
+		}
+		sn = built
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	// 构建快照并发布。
-	sn := s.builder.Build(runID, version, sum, string(pulsesJSON))
-	sn.Status = model.SnapshotPublished
-	now := time.Now().UTC()
-	sn.PublishedAt = &now
-
-	// 旧已发布快照 → superseded。
-	if err := s.store.MarkSuperseded(runID); err != nil {
-		return nil, err
-	}
-	if err := s.store.Create(sn); err != nil {
-		return nil, err
-	}
-
-	// 封存运行。
-	if _, err := s.runStore.UpdateStatus(runID, model.RunCompleted, model.RunSealed); err != nil {
-		return nil, err
+	if !sealed {
+		// run 已被另一并发请求先行封存：不可再发布。
+		return nil, fmt.Errorf("%w: run is sealed, no longer publishable", model.ErrSealed)
 	}
 	return sn, nil
 }

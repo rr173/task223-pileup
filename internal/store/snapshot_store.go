@@ -46,6 +46,15 @@ func (s *SnapshotStore) NextVersion(runID string) (int, error) {
 	return n + 1, err
 }
 
+// NextVersionTx 在给定事务内读取下一个快照版本号。
+// 版本号的读与随后的插入放在同一事务内紧邻执行，避免跨请求读到同一版本号
+// 而争抢 (run_id, version) 唯一约束。
+func (s *SnapshotStore) NextVersionTx(tx *sql.Tx, runID string) (int, error) {
+	var n int
+	err := tx.QueryRow(`SELECT COALESCE(MAX(version),0) FROM snapshots WHERE run_id = ?`, runID).Scan(&n)
+	return n + 1, err
+}
+
 // Create 插入快照。
 func (s *SnapshotStore) Create(sn *model.CountSnapshot) error {
 	var published any
@@ -53,6 +62,26 @@ func (s *SnapshotStore) Create(sn *model.CountSnapshot) error {
 		published = ts(*sn.PublishedAt)
 	}
 	_, err := s.db.SQL().Exec(
+		`INSERT INTO snapshots (id, run_id, version, status, total_counts, recovered_counts, unresolved_counts, observed_count_rate, true_count_rate, effective_observation_ns, dead_time_fraction, unrecoverable_zones, pulses_json, summary, created_at, published_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		sn.ID, sn.RunID, sn.Version, sn.Status, sn.TotalCounts, sn.RecoveredCounts, sn.UnresolvedCounts,
+		sn.ObservedCountRate, sn.TrueCountRate, sn.EffectiveObservationNs, sn.DeadTimeFraction,
+		sn.UnrecoverableZones, sn.PulsesJSON, sn.Summary, ts(sn.CreatedAt), published,
+	)
+	if err != nil {
+		return fmt.Errorf("insert snapshot: %w", err)
+	}
+	return nil
+}
+
+// CreateTx 在给定事务内插入快照。与封存决策共享同一事务，
+// 确保封存与快照写入原子提交。
+func (s *SnapshotStore) CreateTx(tx *sql.Tx, sn *model.CountSnapshot) error {
+	var published any
+	if sn.PublishedAt != nil {
+		published = ts(*sn.PublishedAt)
+	}
+	_, err := tx.Exec(
 		`INSERT INTO snapshots (id, run_id, version, status, total_counts, recovered_counts, unresolved_counts, observed_count_rate, true_count_rate, effective_observation_ns, dead_time_fraction, unrecoverable_zones, pulses_json, summary, created_at, published_at)
 		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		sn.ID, sn.RunID, sn.Version, sn.Status, sn.TotalCounts, sn.RecoveredCounts, sn.UnresolvedCounts,
@@ -99,6 +128,18 @@ func (s *SnapshotStore) ListByRun(runID string) ([]model.CountSnapshot, error) {
 // MarkSuperseded 把某运行已发布快照标记为替代（仅当状态为 published）。
 func (s *SnapshotStore) MarkSuperseded(runID string) error {
 	_, err := s.db.SQL().Exec(
+		`UPDATE snapshots SET status = ? WHERE run_id = ? AND status = ?`,
+		model.SnapshotSuperseded, runID, model.SnapshotPublished,
+	)
+	if err != nil {
+		return fmt.Errorf("supersede snapshots: %w", err)
+	}
+	return nil
+}
+
+// MarkSupersededTx 在给定事务内把已发布快照标记为替代，与封存/写入共享事务。
+func (s *SnapshotStore) MarkSupersededTx(tx *sql.Tx, runID string) error {
+	_, err := tx.Exec(
 		`UPDATE snapshots SET status = ? WHERE run_id = ? AND status = ?`,
 		model.SnapshotSuperseded, runID, model.SnapshotPublished,
 	)

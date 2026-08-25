@@ -162,7 +162,7 @@ func (s *DeconvService) Deconvolve(runID string) (*DeconvResult, error) {
 	}
 
 	// 步骤 3：参考脉冲（优先取已锁定，否则自动提取）。
-	ref, err := s.lockOrExtractReference(run)
+	ref, err := s.lockOrExtractReference(run, bl.NoiseFloor)
 	if err != nil {
 		return nil, err
 	}
@@ -357,6 +357,7 @@ func (s *DeconvService) sampleToNs(run *model.Run, sample int) int64 {
 }
 
 // extractShape 从波形中提取归一化参考脉冲形状（返回形状与峰位置）。
+// 以最强峰为中心，用于手动锁定（调用方已指定窗口）。
 func (s *DeconvService) extractShape(samples []float64, base float64, radius int) ([]float64, int) {
 	wave := subtractBaseline(samples, base)
 	// 用最强峰作为参考脉冲源。
@@ -370,18 +371,62 @@ func (s *DeconvService) extractShape(samples []float64, base float64, radius int
 	if amp <= 0 {
 		return nil, 0
 	}
+	shape := s.extractShapeAt(samples, base, pos, radius)
+	if shape == nil {
+		return nil, 0
+	}
+	return shape, pos
+}
+
+// extractShapeAt 以给定峰位置为中心、radius 为半径提取归一化参考脉冲形状。
+// 归一化（峰值缩放到 1.0）由 deconv.ExtractReference 完成，保持既有行为。
+func (s *DeconvService) extractShapeAt(samples []float64, base float64, peakPos, radius int) []float64 {
+	wave := subtractBaseline(samples, base)
+	if peakPos < 0 || peakPos >= len(wave) || wave[peakPos] <= 0 {
+		return nil
+	}
 	if radius < 2 {
 		radius = 8
 	}
-	return deconv.ExtractReference(wave, pos, radius), pos
+	return deconv.ExtractReference(wave, peakPos, radius)
+}
+
+// isolatedPeak 在去基线波形上检测峰并分组，返回第一个孤立（非堆积）峰。
+// 堆积组（含多个靠得过近的峰）不可用作参考脉冲源——以其中最强峰为中心
+// 提取形状会混入相邻脉冲贡献，污染后续解卷积的匹配核。空窗口或仅含堆积
+// 的窗口返回零值 ok=false。
+func (s *DeconvService) isolatedPeak(samples []float64, base, noiseFloor float64, dtSamples int) (pk detector.Peak, ok bool) {
+	wave := subtractBaseline(samples, base)
+	threshold := noiseFloor * 3
+	if threshold < 0.05 {
+		threshold = 0.05
+	}
+	peakDet := detector.NewPeakDetector(threshold, maxInt(2, dtSamples/2))
+	peaks := peakDet.Detect(wave)
+	if len(peaks) == 0 {
+		return detector.Peak{}, false
+	}
+	groups := detector.NewPileUpDetector(dtSamples).Group(peaks)
+	// 优先选择幅度最大的孤立组，保证参考信噪比。
+	for _, g := range groups {
+		if g.IsPiled() {
+			continue
+		}
+		p := g.Peaks[0]
+		if !ok || p.Amplitude > pk.Amplitude {
+			pk = p
+			ok = true
+		}
+	}
+	return pk, ok
 }
 
 // lockOrExtractReference 返回参考脉冲：优先已锁定，否则从孤立脉冲自动提取。
-func (s *DeconvService) lockOrExtractReference(run *model.Run) (*model.ReferencePulse, error) {
+func (s *DeconvService) lockOrExtractReference(run *model.Run, noiseFloor float64) (*model.ReferencePulse, error) {
 	if ref, err := s.baselineStore.GetReferencePulse(run.ID); err == nil {
 		return ref, nil
 	}
-	// 自动提取：从第一个含孤立脉冲的窗口提取。
+	// 自动提取：跳过含堆积的窗口，从可确认的孤立脉冲建立参考。
 	windows, err := s.windowStore.ListByRun(run.ID)
 	if err != nil {
 		return nil, err
@@ -395,7 +440,12 @@ func (s *DeconvService) lockOrExtractReference(run *model.Run) (*model.Reference
 		if err != nil {
 			continue
 		}
-		shape, _ := s.extractShape(samples, w.BaselineLevel, dtSamples)
+		// 仅当窗口含可确认的孤立脉冲时才提取，避免从堆积波形污染参考形状。
+		pk, ok := s.isolatedPeak(samples, w.BaselineLevel, noiseFloor, dtSamples)
+		if !ok {
+			continue
+		}
+		shape := s.extractShapeAt(samples, w.BaselineLevel, pk.Position, dtSamples)
 		if shape == nil {
 			continue
 		}

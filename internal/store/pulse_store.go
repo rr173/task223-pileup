@@ -127,10 +127,11 @@ func (s *PulseStore) CountSeparated(runID string) (int, error) {
 }
 
 // CountRecovered 统计由堆积解卷积恢复的脉冲（group_index > 0）。
+// 孤立脉冲的 group_index 为 0，虽计入 total_counts 但不计入恢复计数。
 func (s *PulseStore) CountRecovered(runID string) (int, error) {
 	var n int
 	err := s.db.SQL().QueryRow(
-		`SELECT COUNT(*) FROM pulses WHERE run_id = ? AND status IN (?, ?)`,
+		`SELECT COUNT(*) FROM pulses WHERE run_id = ? AND status IN (?, ?) AND group_index > 0`,
 		runID, model.PulseSeparated, model.PulseConfirmed).Scan(&n)
 	return n, err
 }

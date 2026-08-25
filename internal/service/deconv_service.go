@@ -219,15 +219,16 @@ func (s *DeconvService) Deconvolve(runID string) (*DeconvResult, error) {
 		peaks := peakDet.Detect(wave)
 		groups := pileUpDet.Group(peaks)
 		for _, g := range groups {
-			groupIdx++
 			if !g.IsPiled() {
-				// 孤立脉冲：直接确认。
+				// 孤立脉冲：直接确认。group_index 保持 0，仅计入 total_counts，
+				// 不计入 recovered_counts（孤立脉冲非由解卷积恢复）。
 				pk := g.Peaks[0]
-				s.addPulse(run, w, pk.Position, pk.Amplitude, groupIdx, model.PulseSeparated, 0, 0.99)
+				s.addPulse(run, w, pk.Position, pk.Amplitude, 0, model.PulseSeparated, 0, 0.99)
 				continue
 			}
 			// 堆积：解卷积。最小间隔取脉冲可分辨宽度（死区时间的 1/4），
 			// 而非死区时间本身——堆积脉冲间距小于死区但大于可分辨宽度。
+			groupIdx++
 			res.PiledWindowCount++
 			minSep := maxInt(2, dtSamples/4)
 			result := s.deconvolver.Deconvolve(wave, refShape, minSep, bl.NoiseFloor)

@@ -45,11 +45,14 @@ func (s *SnapshotService) Publish(runID string) (*model.CountSnapshot, error) {
 	}
 
 	// 计数汇总。
+	// separated 含孤立脉冲与解卷积恢复脉冲（均为观测计数），计入 total_counts；
+	// recovered 仅统计从堆积波形中解卷积恢复出的脉冲（group_index > 0），
+	// 孤立脉冲虽计入 total_counts 但不计入 recovered_counts。
 	separated, err := s.pulseStore.CountSeparated(runID)
 	if err != nil {
 		return nil, err
 	}
-	recovered, err := s.pulseStore.CountSeparated(runID)
+	recovered, err := s.pulseStore.CountRecovered(runID)
 	if err != nil {
 		return nil, err
 	}
